@@ -15,6 +15,7 @@ sim/verilator/sim.vcd
 
 # UVM / simulator outputs
 sim/uvm/xsim.dir/
+sim/uvm/xsim.covdb/
 sim/uvm/work/
 sim/uvm/*.jou
 sim/uvm/*.log
