@@ -15,7 +15,7 @@ SIM ?= xsim
 ifeq ($(SIM),xsim)
 run:
 	xvlog -sv --incr -L uvm $(UVM_IF) $(UVM_PKG) $(RTL) $(TB_TOP)
-	xelab -L uvm --debug typical uart_tb_top -s uart_tb
+	xelab -L uvm --debug typical --timescale 1ns/1ps uart_tb_top -s uart_tb
 	xsim uart_tb --runall
 
 clean:

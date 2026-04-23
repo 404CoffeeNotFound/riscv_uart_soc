@@ -55,14 +55,33 @@ module uart_tb_top;
         mem_valid <= 0;
     endtask
 
-    // UVM boot
+    // UVM boot — run_test must fire at time 0 (no prior consumption of sim time)
     initial begin
         uvm_config_db#(virtual uart_if)::set(null, "uvm_test_top.env.agt.*", "vif", uif);
-        // Ensure DUT is out of reset before sequences start
+        run_test("uart_basic_test");
+    end
+
+    // After reset, configure UART CTRL register (TX_EN | RX_EN) then run a
+    // software-style loopback: whenever RX FIFO has a byte, pop it and push it
+    // into TX FIFO.  This lets the monitor observe what the DUT received from
+    // the driver, via the DUT's own TX engine — exercising the full data path.
+    initial begin
+        logic [31:0] status, data;
         wait (rst_n == 1);
-        // Default: enable TX+RX
-        bus_write(8'h08, 32'h03);
-        run_test("uart_base_test");
+        @(posedge clk);
+        bus_write(8'h08, 32'h03);     // CTRL = TX_EN | RX_EN
+
+        forever begin
+            bus_read(8'h04, status);
+            if (!status[2] /*RX_EMPTY*/) begin
+                bus_read(8'h00, data);        // pop RX FIFO
+                // wait until TX FIFO not full, then push
+                do bus_read(8'h04, status); while (status[1] /*TX_FULL*/);
+                bus_write(8'h00, data);
+            end else begin
+                @(posedge clk);               // small idle tick
+            end
+        end
     end
 
     initial begin

@@ -1,3 +1,4 @@
+`timescale 1ns/1ps
 // uart_uvc_pkg.sv — minimal UVM UVC for the UART peripheral.
 // Transaction / driver / monitor / sequencer / agent / base sequence / env / scoreboard.
 // Functional coverage lives in the monitor.
@@ -185,9 +186,25 @@ package uart_uvc_pkg;
             for (int i = 0; i < n; i++) begin
                 uart_item tr = uart_item::type_id::create("tr");
                 start_item(tr);
-                assert(tr.randomize());
+                if (!tr.randomize()) `uvm_fatal("RAND", "randomize failed")
                 finish_item(tr);
             end
+        endtask
+    endclass
+
+    // ----------------------- concrete test (runs sequence) -----------------------
+    class uart_basic_test extends uart_base_test;
+        `uvm_component_utils(uart_basic_test)
+        function new(string name, uvm_component parent); super.new(name, parent); endfunction
+        task run_phase(uvm_phase phase);
+            uart_basic_seq seq = uart_basic_seq::type_id::create("seq");
+            seq.n = 8;
+            phase.raise_objection(this);
+            `uvm_info("TEST", $sformatf("starting uart_basic_seq n=%0d", seq.n), UVM_LOW)
+            seq.start(env.agt.seqr);
+            // drain time — allow final byte to shift out and be captured by monitor
+            #(2_000_000);   // 2 ms @ 1ns timescale
+            phase.drop_objection(this);
         endtask
     endclass
 endpackage

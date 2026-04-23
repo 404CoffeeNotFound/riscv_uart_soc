@@ -303,6 +303,11 @@ module uart_top #(
     assign rx_push    = rx_byte_valid && !rx_full;
     assign rx_data_in = rx_byte_data;
 
+    // --- bus decode (declared early; strict tools like xsim require this) ---
+    logic bus_we, bus_re;
+    assign bus_we = mem_valid && (mem_wstrb != 4'b0000);
+    assign bus_re = mem_valid && (mem_wstrb == 4'b0000);
+
     always_ff @(posedge clk) begin
         if (!rst_n) begin
             frame_err_sticky <= 1'b0;
@@ -314,11 +319,6 @@ module uart_top #(
                 {frame_err_sticky, overrun_sticky} <= 2'b00;
         end
     end
-
-    // --- bus decode ---
-    logic bus_we, bus_re;
-    assign bus_we = mem_valid && (mem_wstrb != 4'b0000);
-    assign bus_re = mem_valid && (mem_wstrb == 4'b0000);
 
     logic [31:0] status_word, ctrl_word;
     assign status_word = {26'd0, overrun_sticky, frame_err_sticky,
@@ -374,4 +374,49 @@ module uart_top #(
     assign irq = (tx_int_en_q  &  tx_empty) |
                  (rx_int_en_q  & ~rx_empty) |
                  (err_int_en_q & (frame_err_sticky | overrun_sticky));
+
+    // -------------------------------------------------------------------
+    // SVA assertions — simulation only.  Guarded so synthesis tools skip.
+    // These catch protocol/state-machine violations that stay silent in
+    // ordinary simulation runs (the kind of bugs that show up only on the
+    // board at 3am).
+    // -------------------------------------------------------------------
+`ifndef SYNTHESIS
+`ifndef VERILATOR
+    // (SVA properties use $rose / |=> / disable-iff — xsim/Questa only.)
+    // A1: UART TX line must idle high whenever the TX FSM is in S_IDLE.
+    property p_tx_idle_high;
+        @(posedge clk) disable iff (!rst_n)
+        (u_tx.state == 2'd0) |-> (txd == 1'b1);
+    endproperty
+    a_tx_idle_high: assert property (p_tx_idle_high)
+        else $error("[SVA] TX line driven low while TX FSM is idle");
+
+    // A2: FIFO push is always gated by !full.  If this ever fires, upstream
+    //     logic dropped a byte silently.
+    a_tx_no_overflow: assert property (
+        @(posedge clk) disable iff (!rst_n) !(tx_push && tx_full))
+        else $error("[SVA] TX FIFO push asserted while FIFO is full");
+
+    // A3: RX push is gated by !full; the overrun-sticky bit tracks drops.
+    //     If rx_push&&rx_full ever fires, the rx_push logic is broken.
+    a_rx_no_overflow: assert property (
+        @(posedge clk) disable iff (!rst_n) !(rx_push && rx_full))
+        else $error("[SVA] RX FIFO push asserted while FIFO is full");
+
+    // A4: CLR_ERR: writing CTRL with bit[5]=1 clears both sticky bits by
+    //     the next cycle (barring a coincident new error).
+    a_clr_err: assert property (
+        @(posedge clk) disable iff (!rst_n)
+        (bus_we && mem_addr[7:2] == 6'h02 && mem_wdata[5] && !rx_byte_valid)
+        |=> (!frame_err_sticky && !overrun_sticky))
+        else $error("[SVA] CLR_ERR did not clear sticky error bits");
+
+    // A5: rx_byte_valid from the RX engine must be a 1-cycle pulse.
+    a_rx_pulse: assert property (
+        @(posedge clk) disable iff (!rst_n)
+        $rose(u_rx.byte_valid) |=> !u_rx.byte_valid)
+        else $error("[SVA] rx byte_valid should be a 1-cycle pulse");
+`endif  // !VERILATOR
+`endif  // !SYNTHESIS
 endmodule
