@@ -3,7 +3,9 @@
 #        VCD=1 make run -> also dump sim.vcd
 ROOT     = ../..
 SRCS     = $(ROOT)/rtl/core/picorv32/picorv32.v \
+           $(ROOT)/rtl/peripherals/uart/uart_core.sv \
            $(ROOT)/rtl/peripherals/uart/uart_top.sv \
+           $(ROOT)/rtl/bus/native_to_axi_lite.sv \
            $(ROOT)/rtl/soc/soc_top.sv
 TOP      = soc_top
 OBJDIR   = obj_dir

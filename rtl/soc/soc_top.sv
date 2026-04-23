@@ -1,41 +1,41 @@
-// soc_top.sv — PicoRV32 + 16KB BRAM + UART + GPIO(LEDs) on Zybo Z7-20.
-// PicoRV32 native bus is routed to a simple address decoder.
+// soc_top.sv — PicoRV32 + 16KB BRAM + UART (AXI4-Lite) + GPIO on Zybo Z7-20.
+//
+// PicoRV32's native memory bus goes to an address decoder that routes:
+//   * 0x0000_0000 region  → BRAM         (native, 1-cycle latency)
+//   * 0x1000_0000 region  → native_to_axi_lite → uart_top (AXI4-Lite slave)
+//   * 0x2000_0000 region  → GPIO LEDs    (native, 1-cycle latency)
 `timescale 1ns/1ps
 
 module soc_top #(
     parameter int SYS_CLK_HZ  = 50_000_000,
-    parameter int BRAM_WORDS  = 4096,        // 16 KB
-    parameter     BRAM_INIT   = "hello.mem"  // loaded at elab; empty string = none
+    parameter int BRAM_WORDS  = 4096,
+    parameter     BRAM_INIT   = "hello.mem"
 )(
     input  logic        sys_clk_125,
-    input  logic        rst_btn,    // BTN0 (active-high on Zybo)
+    input  logic        rst_btn,
     output logic [3:0]  led,
     input  logic        uart_rx,
     output logic        uart_tx
 );
     // -------------------------------------------------------------------
     // Clock / reset
-    //   Use the 125 MHz input directly for now.  Replace with MMCM in Vivado
-    //   (Clocking Wizard IP) before Week 5 if timing requires.
     // -------------------------------------------------------------------
     logic clk;
     assign clk = sys_clk_125;
-
     logic rst_n;
     logic [3:0] rst_sync;
     always_ff @(posedge clk) rst_sync <= {rst_sync[2:0], ~rst_btn};
     assign rst_n = rst_sync[3];
 
     // -------------------------------------------------------------------
-    // PicoRV32 core
+    // CPU
     // -------------------------------------------------------------------
     logic        mem_valid, mem_instr, mem_ready;
     logic [31:0] mem_addr, mem_wdata, mem_rdata;
     logic [3:0]  mem_wstrb;
     logic [31:0] irq;
-
+    logic        uart_irq;
     assign irq = {31'd0, uart_irq};
-    logic uart_irq;
 
     picorv32 #(
         .ENABLE_COUNTERS   (1),
@@ -71,9 +71,6 @@ module soc_top #(
 
     // -------------------------------------------------------------------
     // Address decode
-    //   BRAM  0x0000_0000 .. 0x0000_3FFF   (when addr[31:24] == 0x00)
-    //   UART  0x1000_0000 .. 0x1000_00FF   (when addr[31:24] == 0x10)
-    //   GPIO  0x2000_0000 .. 0x2000_000F   (when addr[31:24] == 0x20)
     // -------------------------------------------------------------------
     logic sel_bram, sel_uart, sel_gpio;
     assign sel_bram = mem_valid && (mem_addr[31:24] == 8'h00);
@@ -81,7 +78,7 @@ module soc_top #(
     assign sel_gpio = mem_valid && (mem_addr[31:24] == 8'h20);
 
     // -------------------------------------------------------------------
-    // BRAM  (simple, 1-cycle latency)
+    // BRAM
     // -------------------------------------------------------------------
     logic [31:0] bram [BRAM_WORDS];
     logic [31:0] bram_rdata;
@@ -103,25 +100,72 @@ module soc_top #(
     end
 
     // -------------------------------------------------------------------
-    // UART
+    // UART via native-to-AXI4-Lite bridge
     // -------------------------------------------------------------------
-    logic [31:0] uart_rdata;
-    logic        uart_ready;
-    uart_top #(.CLK_FREQ_HZ(SYS_CLK_HZ), .DEFAULT_BAUD(115200)) u_uart (
-        .clk, .rst_n,
+    logic [31:0] uart_awaddr, uart_wdata, uart_araddr, uart_rdata_axi;
+    logic [3:0]  uart_wstrb;
+    logic [2:0]  uart_awprot, uart_arprot;
+    logic [1:0]  uart_bresp, uart_rresp;
+    logic        uart_awvalid, uart_awready;
+    logic        uart_wvalid,  uart_wready;
+    logic        uart_bvalid,  uart_bready;
+    logic        uart_arvalid, uart_arready;
+    logic        uart_rvalid,  uart_rready;
+
+    logic [31:0] uart_bridge_rdata;
+    logic        uart_bridge_ready;
+
+    native_to_axi_lite u_bridge (
+        .aclk      (clk),
+        .aresetn   (rst_n),
         .mem_valid (sel_uart),
-        .mem_ready (uart_ready),
-        .mem_addr  (mem_addr[7:0]),
+        .mem_ready (uart_bridge_ready),
+        .mem_addr  (mem_addr),
         .mem_wdata (mem_wdata),
         .mem_wstrb (mem_wstrb),
-        .mem_rdata (uart_rdata),
-        .rxd       (uart_rx),
-        .txd       (uart_tx),
-        .irq       (uart_irq)
+        .mem_rdata (uart_bridge_rdata),
+
+        .m_axi_awaddr (uart_awaddr), .m_axi_awprot (uart_awprot),
+        .m_axi_awvalid(uart_awvalid), .m_axi_awready(uart_awready),
+        .m_axi_wdata  (uart_wdata),  .m_axi_wstrb  (uart_wstrb),
+        .m_axi_wvalid (uart_wvalid), .m_axi_wready (uart_wready),
+        .m_axi_bresp  (uart_bresp),  .m_axi_bvalid (uart_bvalid),
+        .m_axi_bready (uart_bready),
+        .m_axi_araddr (uart_araddr), .m_axi_arprot (uart_arprot),
+        .m_axi_arvalid(uart_arvalid), .m_axi_arready(uart_arready),
+        .m_axi_rdata  (uart_rdata_axi), .m_axi_rresp(uart_rresp),
+        .m_axi_rvalid (uart_rvalid), .m_axi_rready (uart_rready)
+    );
+
+    uart_top #(.CLK_FREQ_HZ(SYS_CLK_HZ), .DEFAULT_BAUD(115200)) u_uart (
+        .aclk          (clk),
+        .aresetn       (rst_n),
+        .s_axi_awaddr  (uart_awaddr),
+        .s_axi_awprot  (uart_awprot),
+        .s_axi_awvalid (uart_awvalid),
+        .s_axi_awready (uart_awready),
+        .s_axi_wdata   (uart_wdata),
+        .s_axi_wstrb   (uart_wstrb),
+        .s_axi_wvalid  (uart_wvalid),
+        .s_axi_wready  (uart_wready),
+        .s_axi_bresp   (uart_bresp),
+        .s_axi_bvalid  (uart_bvalid),
+        .s_axi_bready  (uart_bready),
+        .s_axi_araddr  (uart_araddr),
+        .s_axi_arprot  (uart_arprot),
+        .s_axi_arvalid (uart_arvalid),
+        .s_axi_arready (uart_arready),
+        .s_axi_rdata   (uart_rdata_axi),
+        .s_axi_rresp   (uart_rresp),
+        .s_axi_rvalid  (uart_rvalid),
+        .s_axi_rready  (uart_rready),
+        .rxd           (uart_rx),
+        .txd           (uart_tx),
+        .irq           (uart_irq)
     );
 
     // -------------------------------------------------------------------
-    // GPIO: 4-bit LED register
+    // GPIO
     // -------------------------------------------------------------------
     logic [31:0] gpio_rdata;
     logic        gpio_ready;
@@ -140,8 +184,15 @@ module soc_top #(
     always_comb begin
         mem_rdata = 32'd0;
         mem_ready = 1'b0;
-        if (bram_ready)     begin mem_rdata = bram_rdata; mem_ready = 1'b1; end
-        else if (uart_ready) begin mem_rdata = uart_rdata; mem_ready = 1'b1; end
-        else if (gpio_ready) begin mem_rdata = gpio_rdata; mem_ready = 1'b1; end
+        if (bram_ready) begin
+            mem_rdata = bram_rdata;
+            mem_ready = 1'b1;
+        end else if (uart_bridge_ready) begin
+            mem_rdata = uart_bridge_rdata;
+            mem_ready = 1'b1;
+        end else if (gpio_ready) begin
+            mem_rdata = gpio_rdata;
+            mem_ready = 1'b1;
+        end
     end
 endmodule
