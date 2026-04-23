@@ -58,7 +58,10 @@ module uart_tb_top;
     // UVM boot — run_test must fire at time 0 (no prior consumption of sim time)
     initial begin
         uvm_config_db#(virtual uart_if)::set(null, "uvm_test_top.env.agt.*", "vif", uif);
-        run_test("uart_basic_test");
+        // Pass no argument so +UVM_TESTNAME=<name> (from Makefile) selects
+        // the concrete test.  Falls back to uart_basic_test if not provided.
+        if ($test$plusargs("UVM_TESTNAME")) run_test();
+        else                                run_test("uart_basic_test");
     end
 
     // After reset, configure UART CTRL register (TX_EN | RX_EN) then run a
