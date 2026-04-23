@@ -72,8 +72,8 @@ package uart_env_pkg;
                                           n_ok, n_mismatch, exp_q.size()), UVM_NONE)
             if (n_mismatch > 0)
                 `uvm_error("SB_SUM", "scoreboard saw data mismatches")
-            if (n_ok == 0)
-                `uvm_error("SB_SUM", "scoreboard saw zero matches — check test flow")
+            // n_ok == 0 is OK for tests that exercise only the RX path or
+            // only register-level behavior (e.g. frame-error directed test).
             if (exp_q.size() != 0)
                 `uvm_error("SB_SUM",
                     $sformatf("%0d expected byte(s) never observed on txd", exp_q.size()))

@@ -11,7 +11,7 @@ run:
 	xsim uart_tb --runall --testplusarg "UVM_TESTNAME=$(TEST)"
 
 regress:
-	@for t in uart_basic_test; do \
+	@for t in uart_basic_test uart_frame_err_test; do \
 	    echo "=== $$t ==="; \
 	    $(MAKE) SIM=xsim TEST=$$t run 2>&1 | tee $$t.log | \
 	        grep -E "UVM_ERROR|UVM_FATAL|SB_SUM" | head -10; \

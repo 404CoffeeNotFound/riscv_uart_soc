@@ -159,4 +159,22 @@ package uart_pkg;
             end
         endtask
     endclass
+
+    // Inject exactly one byte on rxd with stop=0 — used by the frame-error
+    // directed test to trigger the DUT's sticky FRAME_ERR bit.
+    class uart_one_err_seq extends uvm_sequence#(uart_item);
+        `uvm_object_utils(uart_one_err_seq)
+        rand bit [7:0] data_val = 8'h5A;
+        function new(string name = "uart_one_err_seq"); super.new(name); endfunction
+        task body();
+            uart_item tr = uart_item::type_id::create("tr");
+            start_item(tr);
+            if (!tr.randomize() with {
+                data == data_val;
+                inject_frame_err == 1;
+                gap_bits == 4;          // give the RX engine idle time to settle
+            }) `uvm_fatal("RAND","randomize failed")
+            finish_item(tr);
+        endtask
+    endclass
 endpackage
