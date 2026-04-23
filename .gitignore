@@ -1,0 +1,37 @@
+# Externally fetched RISC-V core — run scripts/fetch_picorv32.sh
+rtl/core/picorv32/
+
+# SW build outputs
+sw/hello/hello.elf
+sw/hello/hello.bin
+sw/hello/hello.mem
+sw/hello/hello.dis
+sw/**/*.o
+
+# Verilator outputs
+sim/verilator/obj_dir/
+sim/verilator/hello.mem
+sim/verilator/sim.vcd
+
+# UVM / simulator outputs
+sim/uvm/xsim.dir/
+sim/uvm/work/
+sim/uvm/*.jou
+sim/uvm/*.log
+sim/uvm/*.pb
+sim/uvm/*.wdb
+sim/uvm/*.vcd
+sim/uvm/transcript
+
+# Vivado project
+vivado_project/
+*.jou
+*.log
+*.str
+.Xil/
+
+# editor / OS
+*.swp
+*~
+.DS_Store
+.vscode/
