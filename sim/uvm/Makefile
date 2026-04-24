@@ -3,10 +3,15 @@
 SIM  ?= xsim
 TEST ?= uart_basic_test
 
+INCDIRS = -i ./lib/axi_lite_uvc \
+          -i ./lib/uart_uvc \
+          -i ./env \
+          -i ./test
+
 # ---------------- xsim ----------------
 ifeq ($(SIM),xsim)
 run:
-	xvlog -sv --incr -L uvm -f filelist.f
+	xvlog -sv --incr -L uvm $(INCDIRS) -f filelist.f
 	xelab -L uvm --debug typical --timescale 1ns/1ps uart_tb_top -s uart_tb
 	xsim uart_tb --runall --testplusarg "UVM_TESTNAME=$(TEST)"
 
@@ -26,7 +31,7 @@ soc-run:
 	@test -f ../../sw/bootloader/bootloader.mem || (echo "Build SW first: make -C ../../sw" && exit 1)
 	@test -f ../../sw/app/app.bin            || (echo "Build SW first: make -C ../../sw" && exit 1)
 	cp ../../sw/bootloader/bootloader.mem ./hello.mem
-	xvlog -sv --incr -L uvm -f filelist_soc.f
+	xvlog -sv --incr -L uvm $(INCDIRS) -f filelist_soc.f
 	xelab -L uvm --debug typical --timescale 1ns/1ps soc_tb_top -s soc_tb
 	xsim soc_tb --runall
 

@@ -1,5 +1,5 @@
-# Compile order for the block-level UVM testbench.
-# RTL first, then interfaces, then UVC packages (bottom-up), then env, tests, tb_top.
+# Compile order for the block-level UVM testbench (DUT = uart_top).
+# Include directories are passed to xvlog via -i flags in the Makefile.
 
 ../../rtl/peripherals/uart/uart_core.sv
 ../../rtl/peripherals/uart/uart_top.sv

@@ -1,5 +1,5 @@
-# SoC-level UVM testbench compile order.
-# Pulls the full RTL stack (CPU + bridge + UART) and the env + tests + soc_tb_top.
+# SoC-level UVM testbench compile order (DUT = soc_top).
+# Include directories are passed to xvlog via -i flags in the Makefile.
 
 ../../rtl/core/picorv32/picorv32.v
 ../../rtl/peripherals/uart/uart_core.sv
