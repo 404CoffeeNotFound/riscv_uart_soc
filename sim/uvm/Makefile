@@ -21,8 +21,17 @@ regress:
 	done; \
 	echo "=== all tests passed ==="
 
+# -------- SoC-level hybrid test (soc_tb_top + uart_boot_test) --------
+soc-run:
+	@test -f ../../sw/bootloader/bootloader.mem || (echo "Build SW first: make -C ../../sw" && exit 1)
+	@test -f ../../sw/app/app.bin            || (echo "Build SW first: make -C ../../sw" && exit 1)
+	cp ../../sw/bootloader/bootloader.mem ./hello.mem
+	xvlog -sv --incr -L uvm -f filelist_soc.f
+	xelab -L uvm --debug typical --timescale 1ns/1ps soc_tb_top -s soc_tb
+	xsim soc_tb --runall
+
 clean:
-	rm -rf xsim.dir xsim.covdb *.jou *.log *.pb *.wdb *.vcd transcript
+	rm -rf xsim.dir xsim.covdb *.jou *.log *.pb *.wdb *.vcd transcript hello.mem
 endif
 
 .PHONY: run regress clean

@@ -160,6 +160,26 @@ package uart_pkg;
         endtask
     endclass
 
+    // Inject an arbitrary byte stream on rxd (clean frames, 1-bit gap).
+    // Used by SoC-level tests that need to upload a binary payload.
+    class uart_inject_seq extends uvm_sequence#(uart_item);
+        `uvm_object_utils(uart_inject_seq)
+        byte unsigned bytes[$];
+        function new(string name = "uart_inject_seq"); super.new(name); endfunction
+        task body();
+            foreach (bytes[i]) begin
+                uart_item tr = uart_item::type_id::create("tr");
+                start_item(tr);
+                if (!tr.randomize() with {
+                    data == bytes[i];
+                    inject_frame_err == 0;
+                    gap_bits == 1;
+                }) `uvm_fatal("RAND","randomize failed")
+                finish_item(tr);
+            end
+        endtask
+    endclass
+
     // Inject exactly one byte on rxd with stop=0 — used by the frame-error
     // directed test to trigger the DUT's sticky FRAME_ERR bit.
     class uart_one_err_seq extends uvm_sequence#(uart_item);

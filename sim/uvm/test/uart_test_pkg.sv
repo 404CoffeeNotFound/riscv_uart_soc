@@ -231,6 +231,82 @@ package uart_test_pkg;
         endtask
     endclass
 
+    // ----------------- SoC-level boot test -----------------
+    // Used with soc_tb_top (instantiates soc_top, not uart_top).  The
+    // PicoRV32 inside the SoC runs the bootloader loaded at 0x0000_0000.
+    // The UART UVC is the only external testbench stimulus:
+    //   - driver  injects sync + length + app.bin payload on rxd
+    //   - monitor observes every byte on txd
+    //   - scoreboard in LOG mode (match_mode=0) accumulates into txd_all
+    //
+    // PASS criteria: txd_all contains "APP_OK\n".
+    class uart_boot_test extends uart_base_test;
+        `uvm_component_utils(uart_boot_test)
+        string app_bin_path = "../../sw/app/app.bin";
+
+        function new(string name, uvm_component parent); super.new(name, parent); endfunction
+
+        // Slurp a raw binary file into a byte queue using $fread.  One byte
+        // at a time to stay compatible across simulators.
+        function void load_app(ref byte unsigned out_bytes[$]);
+            int fd;
+            int n;
+            byte unsigned b;
+            fd = $fopen(app_bin_path, "rb");
+            if (fd == 0) `uvm_fatal("FOPEN", $sformatf("cannot open %s", app_bin_path))
+            forever begin
+                n = $fread(b, fd);
+                if (n == 0) break;
+                out_bytes.push_back(b);
+            end
+            $fclose(fd);
+        endfunction
+
+        task run_phase(uvm_phase phase);
+            byte unsigned app_bytes[$];
+            uart_inject_seq inj = uart_inject_seq::type_id::create("inj");
+            int unsigned len;
+
+            phase.raise_objection(this);
+            `uvm_info("BOOT_TEST", "SoC-level hybrid UVM+C bootloader test", UVM_LOW)
+
+            load_app(app_bytes);
+            len = app_bytes.size();
+            `uvm_info("BOOT_TEST", $sformatf("app.bin = %0d bytes", len), UVM_LOW)
+
+            // Let the bootloader print "BOOT\n" and reach its sync-wait loop.
+            // Bootloader's 5-byte greeting takes ~435 us at 115200 baud.
+            #(1_000_000);   // 1 ms
+
+            // Build the payload stream: 0xA5 sync + 4-byte LE length + app bytes
+            inj.bytes.push_back(8'hA5);
+            for (int i = 0; i < 4; i++)
+                inj.bytes.push_back((len >> (i*8)) & 8'hFF);
+            foreach (app_bytes[i]) inj.bytes.push_back(app_bytes[i]);
+            `uvm_info("BOOT_TEST",
+                $sformatf("injecting %0d bytes on rxd", inj.bytes.size()), UVM_LOW)
+            inj.start(env.uart_agt.seqr);
+
+            // Drain for: LOAD + APP_OK prints (~12 bytes * 87 us ≈ 1 ms)
+            #(3_000_000);
+
+            // Check signatures
+            if (!env.sb.contains("BOOT\n"))
+                `uvm_error("MISSING_BOOT", "no 'BOOT\\n' greeting on txd")
+            if (!env.sb.contains("LOAD\n"))
+                `uvm_error("MISSING_LOAD", "bootloader never printed 'LOAD\\n' (payload not accepted?)")
+            if (!env.sb.contains("APP_OK\n"))
+                `uvm_error("MISSING_APP_OK",
+                    $sformatf("uploaded app did not emit 'APP_OK\\n'. txd_all=%0d bytes",
+                              env.sb.txd_all.len()))
+            else
+                `uvm_info("BOOT_TEST",
+                    "== full boot chain verified: BOOT -> LOAD -> APP_OK ==", UVM_NONE)
+
+            phase.drop_objection(this);
+        endtask
+    endclass
+
     // ----------------- Frame-error directed test -----------------
     // Uses the UART agent to inject a byte with stop=0, then uses the
     // AXI agent to verify that STATUS.FRAME_ERR sets, DATA still reads

@@ -361,24 +361,24 @@ module uart_core #(
 `ifndef SYNTHESIS
 `ifndef VERILATOR
     property p_tx_idle_high;
-        @(posedge clk) disable iff (!rst_n)
+        @(posedge clk) disable iff (rst_n !== 1'b1)
         (u_tx.state == 2'd0) |-> (txd == 1'b1);
     endproperty
     a_tx_idle_high: assert property (p_tx_idle_high)
         else $error("[SVA] TX line driven low while TX FSM is idle");
     a_tx_no_overflow: assert property (
-        @(posedge clk) disable iff (!rst_n) !(tx_push && tx_full))
+        @(posedge clk) disable iff (rst_n !== 1'b1) !(tx_push && tx_full))
         else $error("[SVA] TX FIFO push asserted while FIFO is full");
     a_rx_no_overflow: assert property (
-        @(posedge clk) disable iff (!rst_n) !(rx_push && rx_full))
+        @(posedge clk) disable iff (rst_n !== 1'b1) !(rx_push && rx_full))
         else $error("[SVA] RX FIFO push asserted while FIFO is full");
     a_clr_err: assert property (
-        @(posedge clk) disable iff (!rst_n)
+        @(posedge clk) disable iff (rst_n !== 1'b1)
         (bus_we && mem_addr[7:2] == 6'h02 && mem_wdata[5] && !rx_byte_valid)
         |=> (!frame_err_sticky && !overrun_sticky))
         else $error("[SVA] CLR_ERR did not clear sticky error bits");
     a_rx_pulse: assert property (
-        @(posedge clk) disable iff (!rst_n)
+        @(posedge clk) disable iff (rst_n !== 1'b1)
         $rose(u_rx.byte_valid) |=> !u_rx.byte_valid)
         else $error("[SVA] rx byte_valid should be a 1-cycle pulse");
 `endif
