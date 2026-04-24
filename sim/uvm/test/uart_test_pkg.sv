@@ -95,6 +95,142 @@ package uart_test_pkg;
         endtask
     endclass
 
+    // ----------------- Register read/write test -----------------
+    // Exercises CTRL and BAUD_DIV register paths (write-then-read equality)
+    // and confirms STATUS is read-only / sensible at reset.
+    class uart_reg_rw_test extends uart_base_test;
+        `uvm_component_utils(uart_reg_rw_test)
+        function new(string name, uvm_component parent); super.new(name, parent); endfunction
+
+        task check_ctrl_rw(bit [5:0] pattern);
+            bit [31:0] rd;
+            bit [5:0]  expected;
+            // CTRL bit 5 is CLR_ERR (W1P; reads 0), bits 0..4 are R/W.
+            expected = pattern & 6'h1F;
+            axi_write(UART_CTRL, {26'd0, pattern});
+            axi_read (UART_CTRL, rd);
+            if (rd[5:0] !== expected)
+                `uvm_error("CTRL_RW",
+                    $sformatf("wrote 0x%02h, read 0x%02h (expected 0x%02h)",
+                              pattern, rd[5:0], expected))
+        endtask
+
+        task check_baud_rw(bit [15:0] value);
+            bit [31:0] rd;
+            axi_write(UART_BAUD, {16'd0, value});
+            axi_read (UART_BAUD, rd);
+            if (rd[15:0] !== value)
+                `uvm_error("BAUD_RW",
+                    $sformatf("wrote 0x%04h, read 0x%04h", value, rd[15:0]))
+        endtask
+
+        task run_phase(uvm_phase phase);
+            bit [31:0] status;
+            phase.raise_objection(this);
+            `uvm_info("TEST", "uart_reg_rw_test — register read/write paths", UVM_LOW)
+
+            // CTRL patterns — walk every functional bit
+            check_ctrl_rw(6'b00_0000);
+            check_ctrl_rw(6'b00_0001);   // TX_EN
+            check_ctrl_rw(6'b00_0010);   // RX_EN
+            check_ctrl_rw(6'b00_0100);   // TX_INT_EN
+            check_ctrl_rw(6'b00_1000);   // RX_INT_EN
+            check_ctrl_rw(6'b01_0000);   // ERR_INT_EN
+            check_ctrl_rw(6'b10_0000);   // CLR_ERR (should NOT stick)
+            check_ctrl_rw(6'b01_1111);   // all R/W bits on
+            check_ctrl_rw(6'b00_0011);   // common default (TX+RX)
+
+            // BAUD_DIV — default reset value is 27 (115200 @ 50 MHz).
+            // Walk a few values including corner 0 (baud gen disables ticks).
+            check_baud_rw(16'h001B);
+            check_baud_rw(16'h0001);
+            check_baud_rw(16'hFFFF);
+            check_baud_rw(16'h0000);     // valid write; baud gen idles
+            check_baud_rw(16'h001B);     // restore default
+
+            // STATUS: after the above, RX FIFO is empty, TX FIFO is empty.
+            // We haven't enabled interrupts or induced errors, so the bit
+            // pattern should be: TX_EMPTY=1, RX_EMPTY=1 → 0x05.
+            axi_write(UART_CTRL, (1 << CTRL_TX_EN) | (1 << CTRL_RX_EN));
+            axi_read (UART_STATUS, status);
+            if (status[5:0] !== 6'h05)
+                `uvm_error("STATUS_AT_RESET",
+                    $sformatf("expected STATUS[5:0]=0x05, read 0x%02h", status[5:0]))
+
+            #(50_000);
+            phase.drop_objection(this);
+        endtask
+    endclass
+
+    // ----------------- TX FIFO-full test -----------------
+    // Rapidly writes DATA while polling STATUS.TX_FULL.  Confirms:
+    //   (a) TX_FULL eventually asserts (FIFO actually fills),
+    //   (b) we can drain and TX_EMPTY reasserts,
+    //   (c) scoreboard sees every written byte on txd (no silent drops).
+    class uart_fifo_full_test extends uart_base_test;
+        `uvm_component_utils(uart_fifo_full_test)
+        function new(string name, uvm_component parent); super.new(name, parent); endfunction
+
+        task run_phase(uvm_phase phase);
+            bit [31:0] status;
+            int unsigned n_written = 0;
+            int unsigned drain_polls;
+
+            phase.raise_objection(this);
+            `uvm_info("TEST", "uart_fifo_full_test — fill TX FIFO without overflow", UVM_LOW)
+
+            axi_write(UART_CTRL, (1 << CTRL_TX_EN));   // TX only
+
+            // Fill loop: read STATUS first, write DATA only if not full.
+            for (int i = 0; i < 24; i++) begin
+                axi_read(UART_STATUS, status);
+                if (status[STAT_TX_FULL]) break;
+                axi_write(UART_DATA, 32'h0000_0030 + i);  // ASCII digits/letters
+                n_written++;
+            end
+            `uvm_info("FIFO_DEPTH",
+                $sformatf("wrote %0d bytes before TX_FULL asserted", n_written), UVM_LOW)
+
+            // Sanity: FIFO is 16-deep.  Writes should stop somewhere in 15..17.
+            if (n_written < 14 || n_written > 17)
+                `uvm_error("DEPTH",
+                    $sformatf("unexpected fill count %0d (want 14..17 given TX engine timing)",
+                              n_written))
+
+            // FULL assertion check
+            axi_read(UART_STATUS, status);
+            if (!status[STAT_TX_FULL])
+                `uvm_error("TX_FULL_EXPECTED",
+                    $sformatf("STATUS=0x%08h after fill — TX_FULL should be 1", status))
+
+            // Drain: wait for TX_EMPTY (all bytes shifted out + stop bit complete).
+            // Worst case 17 bytes @ 115200 baud ≈ 1.5 ms.
+            drain_polls = 0;
+            do begin
+                #(50_000);
+                axi_read(UART_STATUS, status);
+                drain_polls++;
+                if (drain_polls > 100)
+                    `uvm_fatal("DRAIN_TIMEOUT",
+                        $sformatf("TX_EMPTY never asserted (STATUS=0x%08h)", status))
+            end while (!status[STAT_TX_EMPTY]);
+            `uvm_info("DRAIN",
+                $sformatf("TX_EMPTY after %0d polls; STATUS=0x%08h", drain_polls, status), UVM_LOW)
+
+            // TX_EMPTY reflects the FIFO only; the TX shift register may
+            // still be sending the final byte.  Pad ≥1 bit-time of wait
+            // (1 byte = ~87 us @ 115200 baud) so the UART monitor can
+            // capture the final byte's stop bit.
+            #(200_000);    // 200 us
+
+            // Final safety: TX_FULL should also be clear
+            if (status[STAT_TX_FULL])
+                `uvm_error("TX_FULL_STUCK", "TX_FULL still set after drain")
+
+            phase.drop_objection(this);
+        endtask
+    endclass
+
     // ----------------- Frame-error directed test -----------------
     // Uses the UART agent to inject a byte with stop=0, then uses the
     // AXI agent to verify that STATUS.FRAME_ERR sets, DATA still reads

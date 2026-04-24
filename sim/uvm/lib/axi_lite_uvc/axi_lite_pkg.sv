@@ -117,9 +117,41 @@ package axi_lite_pkg;
         virtual axi_lite_if vif;
         uvm_analysis_port #(axi_lite_item) ap;
 
+        // Functional coverage on register access patterns.
+        // Bin names assume the UART register map (addr[7:2]) but since the
+        // UVC only sees bits, the bins are generic register offsets that
+        // any peripheral fitting the same convention can consume.
+        covergroup cg_txn with function sample(axi_lite_item tr);
+            option.per_instance = 1;
+            cp_dir   : coverpoint tr.dir {
+                bins write = {AXIL_WRITE};
+                bins read  = {AXIL_READ};
+            }
+            cp_addr  : coverpoint tr.addr[7:2] {
+                bins data_reg   = {6'h00};
+                bins status_reg = {6'h01};
+                bins ctrl_reg   = {6'h02};
+                bins baud_reg   = {6'h03};
+                bins other      = default;
+            }
+            cp_wstrb : coverpoint tr.wstrb iff (tr.dir == AXIL_WRITE) {
+                bins full    = {4'hF};
+                bins partial = {[4'h1:4'hE]};
+                bins none    = {4'h0};
+            }
+            cp_resp  : coverpoint tr.resp {
+                bins okay    = {2'b00};
+                bins exokay  = {2'b01};
+                bins slverr  = {2'b10};
+                bins decerr  = {2'b11};
+            }
+            cx_dir_addr : cross cp_dir, cp_addr;
+        endgroup
+
         function new(string name, uvm_component parent);
             super.new(name, parent);
             ap = new("ap", this);
+            cg_txn = new;
         endfunction
 
         function void build_phase(uvm_phase phase);
@@ -161,6 +193,7 @@ package axi_lite_pkg;
                 tr.wstrb = strb_q;
                 tr.resp  = vif.bresp;
                 ap.write(tr);
+                cg_txn.sample(tr);
             end
         endtask
 
@@ -177,6 +210,7 @@ package axi_lite_pkg;
                 tr.data = vif.rdata;
                 tr.resp = vif.rresp;
                 ap.write(tr);
+                cg_txn.sample(tr);
             end
         endtask
     endclass
