@@ -6,7 +6,15 @@ sw/hello/hello.elf
 sw/hello/hello.bin
 sw/hello/hello.mem
 sw/hello/hello.dis
+sw/bootloader/bootloader.elf
+sw/bootloader/bootloader.bin
+sw/bootloader/bootloader.mem
+sw/bootloader/bootloader.dis
+sw/app/app.elf
+sw/app/app.bin
+sw/app/app.dis
 sw/**/*.o
+sw/**/__pycache__/
 
 # Verilator outputs
 sim/verilator/obj_dir/
