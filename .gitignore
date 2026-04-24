@@ -25,6 +25,7 @@ sim/verilator/sim.vcd
 sim/uvm/xsim.dir/
 sim/uvm/xsim.covdb/
 sim/uvm/work/
+sim/uvm/hello.mem
 sim/uvm/*.jou
 sim/uvm/*.log
 sim/uvm/*.pb
